@@ -26,9 +26,9 @@ The folders to check are passed on the command line, typically through a shell a
 
 - **`count_files_by_date.py`** is the main check. Because every file is renamed with a leading `MM.DD.YYYY_` date, it can count how many photos fall between two dates in any folder, with a per-day and per-extension breakdown. Run it on the import folder and again on the backup location (wherever your "Backups" directory is) with the same date range. If the totals match each other, and match the count your camera reports, nothing was lost. Any file without a date prefix is listed as not yet renamed. It only looks at filenames, not folder names, so it doesn't matter how the backup is organized.
 
-- **`check_lr_catalog.py`** is the Lightroom check. It computes a SHA-256 checksum for every raw file on the card and compares it against the checksums stored in your Lightroom catalog. It lists any card files Lightroom doesn't know about, so you can catch photos that were never imported. It compares file contents, not names or sizes, so it still works if files were renamed.
+- **`check_lr_catalog.py`** is the Lightroom check. It reads the capture time (EXIF `DateTimeOriginal`) of every raw file on the card and compares it against the capture times in your Lightroom catalog. It lists any card files Lightroom doesn't know about, so you can catch photos that were never imported. Lightroom stores no content checksums and the renamed, converted DNGs no longer share names with the card's files, so capture time is the key that survives both.
 
-Python 3.8+ and the standard library only, with nothing to install.
+Python 3.8+ and the standard library only. `check_lr_catalog.py` also needs `exiftool` (`brew install exiftool`), which the renaming step already uses.
 
 ## Scripts
 
@@ -72,7 +72,7 @@ Total files: 227
 
 ### `check_lr_catalog.py`: find files missing from Lightroom
 
-Prompts for an SD card path and a Lightroom catalog (`.lrcat`) path. It SHA-256 hashes every raw file on the card (`.dng .arw .cr2 .nef .orf`) and lists any whose checksum isn't recorded in the catalog.
+Prompts for an SD card path and a Lightroom catalog (`.lrcat`) path. It reads the capture time of every raw file on the card (`.dng .arw .cr2 .nef .orf`) with `exiftool` and lists any whose capture time isn't in the catalog. Files sharing a timestamp (bursts) are matched by count.
 
 ```
 python3 check_lr_catalog.py
@@ -80,7 +80,20 @@ Enter the SD card path: /Volumes/SD
 Enter the Lightroom catalog path: ~/Pictures/Lightroom/Catalog.lrcat
 ```
 
-The catalog is only read. Hashing a full card can take a while. Lightroom must have already computed hashes for the images, so `sha256` can be `NULL` for some photos; those are ignored.
+The catalog is only read, and Lightroom can be open or closed. A file with no capture time is always reported. Two cameras shooting in the same second can mask a missing file, and photos deleted from the catalog show up as missing.
+
+**Checking the results:** after `The following RAW files are not in the Lightroom catalog:`, the script prints one path per line. To eyeball them, paste the list into a file and open them all in Preview (the embedded JPEG previews are shown for ORFs):
+
+```bash
+# paste the listed paths into missing.txt, then:
+tr '\n' '\0' < missing.txt | xargs -0 open -a Preview
+```
+
+Or open a handful by hand:
+
+```bash
+open -a Preview "/Volumes/LEICA M/DCIM/102OLYMP/P7140110.ORF" "/Volumes/LEICA M/DCIM/102OLYMP/P7140111.ORF"
+```
 
 ### Legacy: `compare_files.py`
 
