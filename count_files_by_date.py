@@ -17,6 +17,8 @@ def parse_date(value):
 
 # Renamed files look like "09.23.2026_09.26.54-0001-leica m10p.dng"
 FILENAME_DATE = re.compile(r"^(\d{2})\.(\d{2})\.(\d{4})_")
+# Camera tag follows the sequence number: "..._09.26.54-0001-leica m10p.dng" -> "leica m10p"
+FILENAME_TAG = re.compile(r"^\d{2}\.\d{2}\.\d{4}_[\d.]+-\d+-(.+?)(?:\.[^.]+)?$")
 
 
 def date_from_filename(name):
@@ -31,13 +33,21 @@ def date_from_filename(name):
         return None
 
 
-def count_files_in_range(path, allowed_extensions, from_date, to_date):
+def tag_from_filename(name):
+    """Returns the lowercase camera tag from the filename, or None."""
+    match = FILENAME_TAG.match(name)
+    return match.group(1).strip().lower() if match else None
+
+
+def count_files_in_range(path, allowed_extensions, from_date, to_date, tag=None):
     """
     Recursively counts files matching the extensions whose filename date falls
-    within from_date..to_date (inclusive). Returns (total, per-day Counter, per-extension Counter, unparsed paths).
+    within from_date..to_date (inclusive), and whose camera tag matches `tag` if given.
+    Returns (total, per-day Counter, per-extension Counter, per-camera Counter, unparsed paths).
     """
     per_day = Counter()
     per_ext = Counter()
+    per_camera = Counter()
     unparsed = []
 
     for root, _, files in os.walk(path):
@@ -49,10 +59,14 @@ def count_files_in_range(path, allowed_extensions, from_date, to_date):
             if file_date is None:
                 unparsed.append(os.path.join(root, file))
             elif from_date <= file_date <= to_date:
+                file_tag = tag_from_filename(file) or "(no tag)"
+                if tag and file_tag != tag:
+                    continue
                 per_day[file_date.strftime("%Y-%m-%d")] += 1
                 per_ext[ext] += 1
+                per_camera[file_tag] += 1
 
-    return sum(per_day.values()), per_day, per_ext, unparsed
+    return sum(per_day.values()), per_day, per_ext, per_camera, unparsed
 
 
 def parse_arguments():
@@ -68,6 +82,11 @@ def parse_arguments():
         default="default",
         help="Camera type to adjust allowed extensions. Default is '.dng' and '.jpg'.",
     )
+    parser.add_argument(
+        "--tag",
+        type=str.lower,
+        help="Only count files whose camera tag in the filename matches, e.g. 'epl5' or 'leica m10p'.",
+    )
     return parser.parse_args()
 
 
@@ -80,8 +99,8 @@ if __name__ == "__main__":
     check_folder_exists(args.folder)
     allowed_extensions = get_allowed_extensions(args.camera)
 
-    total, per_day, per_ext, unparsed = count_files_in_range(
-        args.folder, allowed_extensions, args.from_date, args.to_date
+    total, per_day, per_ext, per_camera, unparsed = count_files_in_range(
+        args.folder, allowed_extensions, args.from_date, args.to_date, args.tag
     )
 
     print(
@@ -94,6 +113,9 @@ if __name__ == "__main__":
     print("\nBy extension:")
     for ext in allowed_extensions:
         print(f"  {ext}: {per_ext[ext]}")
+    print("\nBy camera tag:")
+    for camera, count in sorted(per_camera.items()):
+        print(f"  {camera}: {count}")
     print(f"\nTotal files: {total}")
     if unparsed:
         print(f"\nSkipped {len(unparsed)} file(s) with no date in the filename (not renamed yet?):")

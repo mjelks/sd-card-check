@@ -1,63 +1,58 @@
 # sd-card-check
 
-Small Python utilities for checking photos before you wipe an SD card. They answer three questions:
+Small Python utilities for checking photos before you wipe an SD card. They answer two questions:
 
-1. **Did everything on the card make it to my backup drive?** (`compare_files.py`)
-2. **How many photos did I shoot between two dates?** (`count_files_by_date.py`)
-3. **Is everything on the card already in my Lightroom catalog?** (`check_lr_catalog.py`)
+1. **Did everything I shot make it to my import and backup folders?** Count files by date range (`count_files_by_date.py`) and compare the totals.
+2. **Is everything on the card already in my Lightroom catalog?** (`check_lr_catalog.py`)
+
+A third script, `compare_files.py`, is a [legacy](#legacy-compare_filespy) folder-size comparison that is being phased out.
+
+## Overview
+
+The scripts are a safety check for the author's import workflow. Nothing is wiped from the card until the checks pass.
+
+1. **Import** the files from the SD card into `~/Pictures`.
+2. **Rename** them with an `exiftool` script, which puts each file in a folder named for its capture date and prefixes the filename with the date and time, a sequence number and a camera tag:
+
+   ```
+   10.30.2026/10.30.2026_14.00.49-0001-epl5.orf
+   ```
+
+   The `MM.DD.YYYY_` prefix is what `count_files_by_date.py` reads.
+3. **Move** the renamed date folders into the per-camera import folder under `~/Pictures` (e.g. `~/Pictures/imports-leica-m10p`).
+4. **Verify** with the scripts below, then wipe the card.
+
+The folders to check are passed on the command line, typically through a shell alias (see [Bash profile installation](#bash-profile-installation)). The scripts rely on the naming and layout above. See the [TODO](#todo) for making them configurable.
+
+- **`count_files_by_date.py`** is the main check. Because every file is renamed with a leading `MM.DD.YYYY_` date, it can count how many photos fall between two dates in any folder, with a per-day and per-extension breakdown. Run it on the import folder and again on the backup location (wherever your "Backups" directory is) with the same date range. If the totals match each other, and match the count your camera reports, nothing was lost. Any file without a date prefix is listed as not yet renamed. It only looks at filenames, not folder names, so it doesn't matter how the backup is organized.
+
+- **`check_lr_catalog.py`** is the Lightroom check. It computes a SHA-256 checksum for every raw file on the card and compares it against the checksums stored in your Lightroom catalog. It lists any card files Lightroom doesn't know about, so you can catch photos that were never imported. It compares file contents, not names or sizes, so it still works if files were renamed.
 
 Python 3.8+ and the standard library only, with nothing to install.
 
 ## Scripts
 
-### `compare_files.py`: compare card against backup
-
-For each top-level folder in the source (e.g. `DCIM/100OLYMP`), it finds a folder with the same name anywhere under the backup root. It then compares the total size and file count of the matching files. Folders that match are reported as matched. Folders that differ in size, or are missing from the backup, are listed in a summary at the end.
-
-```
-python3 compare_files.py SOURCE_ROOT BACKUP_ROOT [--camera {default,sony,olympus}]
-```
-
-| `--camera` | Extensions compared |
-|------------|---------------------|
-| `default`  | `.dng`, `.jpg`      |
-| `sony`     | `.arw`, `.mov`      |
-| `olympus`  | `.orf`, `.mov`      |
-
-It exits with an error if either folder doesn't exist, which is handy when the backup drive isn't mounted.
-
-Example:
-
-```
-$ python3 compare_files.py /Volumes/SD/DCIM /Volumes/Backup/Photos --camera sony
-Matched '100MSDCF': Size=8123456789 bytes (8.12 GB) | File Count=412
-Mismatch in '101MSDCF': Source=1200000 bytes (1.20 MB), Backup=0 bytes (0.00 bytes)
-
-Grand Total:
-Source: 8124656789 bytes (8.12 GB)
-Backup: 8123456789 bytes (8.12 GB)
-Backup File Count: 412
-Local File Count: 413 (check count in camera)
-
-Summary of mismatches:
-- 101MSDCF: Source Size=1200000 bytes (1.20 MB), Backup Size=0 bytes (0.00 bytes)
-```
-
 ### `count_files_by_date.py`: count photos in a date range
 
-Counts files whose **filename** starts with a `MM.DD.YYYY_` date, such as `09.23.2026_09.26.54-0001-leica m10p.dng`. This is the format produced by the renaming step in your import workflow. Files without that prefix are skipped and listed at the end, so you can spot anything not yet renamed.
+Counts files whose **filename** starts with a `MM.DD.YYYY_` date, such as `09.23.2026_09.26.54-0001-leica m10p.dng`. This is the format produced by the renaming step in the workflow above. Files without that prefix are skipped and listed at the end, so you can spot anything not yet renamed.
 
 ```
 python3 count_files_by_date.py FOLDER FROM_DATE TO_DATE [--camera {default,sony,olympus}]
 ```
 
-Dates are `YYYY-MM-DD` and the range is inclusive.
+Dates are `YYYY-MM-DD` and the range is inclusive. The folder is searched recursively.
 
-Example:
+| `--camera` | Extensions counted |
+|------------|--------------------|
+| `default`  | `.dng`, `.jpg`     |
+| `sony`     | `.arw`, `.mov`     |
+| `olympus`  | `.orf`, `.mov`     |
+
+Example: count the same range in the import folder and in the backup, then compare the totals.
 
 ```
-$ python3 count_files_by_date.py ~/Pictures/2026 2026-09-20 2026-09-25
-Folder: /Users/me/Pictures/2026
+$ python3 count_files_by_date.py ~/Pictures/imports-leica-m10p 2026-09-20 2026-09-25
+Folder: /Users/me/Pictures/imports-leica-m10p
 Range:  2026-09-20 to 2026-09-25
 Camera: default (.dng, .jpg)
 
@@ -68,6 +63,10 @@ By extension:
   .dng: 227
   .jpg: 0
 
+Total files: 227
+
+$ python3 count_files_by_date.py /Volumes/Backup/Photos 2026-09-20 2026-09-25
+...
 Total files: 227
 ```
 
@@ -83,6 +82,26 @@ Enter the Lightroom catalog path: ~/Pictures/Lightroom/Catalog.lrcat
 
 The catalog is only read. Hashing a full card can take a while. Lightroom must have already computed hashes for the images, so `sha256` can be `NULL` for some photos; those are ignored.
 
+### Legacy: `compare_files.py`
+
+> **Deprecated.** This script is a holdover from an earlier workflow and is being replaced by running `count_files_by_date.py` on the backup location. New use isn't recommended.
+
+The earlier workflow was:
+
+1. Import the files to a local drive.
+2. Copy those files to a backup volume.
+3. Compare the two with this script.
+
+For each top-level folder in the source, it finds a folder with the same name anywhere under the backup root. It then compares the total size and file count of the matching files, and reports folders that differ or are missing from the backup.
+
+```
+python3 compare_files.py SOURCE_ROOT BACKUP_ROOT [--camera {default,sony,olympus}]
+```
+
+Why it's being phased out: it only works when the source and backup have identically named folders, so it is sensitive to how each side is organized, and counting files by date range in the backup gives the same assurance without that requirement. It also exits with an error if either folder doesn't exist, which was handy when the backup drive wasn't mounted.
+
+`count_files_by_date.py` still imports two helpers from this file (`get_allowed_extensions` and `check_folder_exists`), so don't delete it until those move. See the [TODO](#todo).
+
 ## Bash profile installation
 
 Clone the repo somewhere permanent:
@@ -96,9 +115,6 @@ Add this to `~/.zshrc` (macOS default) or `~/.bash_profile` / `~/.bashrc`:
 ```bash
 # sd-card-check
 export SD_CARD_CHECK="$HOME/Sites/projects/sd-card-check"
-
-# sdcompare SOURCE BACKUP [--camera sony|olympus]
-alias sdcompare='python3 "$SD_CARD_CHECK/compare_files.py"'
 
 # sdcount FOLDER FROM TO [--camera sony|olympus]
 alias sdcount='python3 "$SD_CARD_CHECK/count_files_by_date.py"'
@@ -116,34 +132,71 @@ source ~/.zshrc    # or: source ~/.bash_profile
 Now use them from anywhere:
 
 ```bash
-sdcompare /Volumes/SD/DCIM /Volumes/Backup/Photos --camera sony
-sdcount ~/Pictures/2026 2026-09-20 2026-09-25
+# import folder, then backup, same range: totals should match
+sdcount ~/Pictures/imports-leica-m10p 2026-09-20 2026-09-25
+sdcount /Volumes/Backup/Photos 2026-09-20 2026-09-25
 sdlr
 ```
 
 ### Optional: shortcuts with your paths baked in
 
-If you always use the same card and backup locations, wrap them in functions:
+If you always use the same import and backup locations, bake the folder into an alias so you only type the dates:
 
 ```bash
-# Check the mounted card against the backup drive
-sdcheck() {
-  python3 "$SD_CARD_CHECK/compare_files.py" \
-    "/Volumes/SD_CARD/DCIM" "/Volumes/Backup/Photos" "$@"
-}
+# Count files in the backup location; pass FROM and TO when you run it
+alias check_backup_count='python3 "$SD_CARD_CHECK/count_files_by_date.py" /Volumes/Backup/Photos'
+```
 
-# Photos shot in the last N days (default 7); macOS `date -v`
+```bash
+check_backup_count 2026-09-20 2026-09-25
+```
+
+The folder is the first argument, so the alias supplies it and the dates (and any `--camera` flag) follow. An equivalent alias for the import folder works the same way:
+
+```bash
+alias check_import_count='python3 "$SD_CARD_CHECK/count_files_by_date.py" ~/Pictures/imports-leica-m10p'
+```
+
+Or, for a rolling "last N days" window, use functions:
+
+```bash
+# Photos in the last N days (default 7) in the import folder; macOS `date -v`
 sdrecent() {
   local days="${1:-7}"
   python3 "$SD_CARD_CHECK/count_files_by_date.py" \
-    "$HOME/Pictures" "$(date -v-"${days}"d +%Y-%m-%d)" "$(date +%Y-%m-%d)"
+    "$HOME/Pictures/imports-leica-m10p" "$(date -v-"${days}"d +%Y-%m-%d)" "$(date +%Y-%m-%d)"
+}
+
+# Same range in the backup location
+sdrecent_backup() {
+  local days="${1:-7}"
+  python3 "$SD_CARD_CHECK/count_files_by_date.py" \
+    "/Volumes/Backup/Photos" "$(date -v-"${days}"d +%Y-%m-%d)" "$(date +%Y-%m-%d)"
 }
 ```
 
-Extra arguments pass through, so `sdcheck --camera olympus` works.
+For another camera, point the function at the matching import folder and pass `--camera`, e.g. `~/Pictures/imports-olympus --camera olympus`.
+
+### Legacy alias
+
+If you still use the old folder comparison:
+
+```bash
+alias sdcompare='python3 "$SD_CARD_CHECK/compare_files.py"'   # sdcompare SOURCE BACKUP [--camera ...]
+```
 
 ## Notes
 
-- `compare_files.py` and `count_files_by_date.py` share helpers, so keep them in the same directory (`count_files_by_date.py` imports from `compare_files.py`).
+- `count_files_by_date.py` imports helpers from `compare_files.py`, so keep them in the same directory for now.
 - Extension matching is case-insensitive.
-- Folder matching in `compare_files.py` is by folder name, not full path, so the first match found under the backup root is used.
+
+## TODO
+
+Future enhancements. The scripts currently assume a specific naming convention and folder layout.
+
+- [ ] **Remove `compare_files.py`.** First move `get_allowed_extensions` and `check_folder_exists` into a shared module (e.g. `common.py`) that `count_files_by_date.py` imports, then delete the legacy script and its alias.
+- [ ] **Compare two folders in one run.** Let `count_files_by_date.py` take multiple folders (import and backup) and report the totals side by side, flagging any difference, so the two-command check becomes one.
+- [ ] **Configurable filename date prefix** in `count_files_by_date.py`. The `MM.DD.YYYY_` format is hardcoded in the `FILENAME_DATE` regex. Add an option (e.g. `--date-format "%Y-%m-%d"` or `--prefix-regex`) so other renaming schemes work.
+- [ ] **Configurable file extensions.** The per-camera lists in `get_allowed_extensions()` and `SUPPORTED_EXTENSIONS` in `check_lr_catalog.py` are hardcoded. Add an `--extensions` flag or a config file, and add more camera presets.
+- [ ] **Command-line arguments for `check_lr_catalog.py`.** It currently prompts interactively for paths, unlike `count_files_by_date.py`.
+- [ ] **Shared config file** (e.g. `config.toml`) for the settings above, so the bash aliases stay short.
