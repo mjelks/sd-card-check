@@ -5,7 +5,7 @@ Small Python utilities for checking photos before you wipe an SD card. They answ
 1. **Did everything I shot make it to my import and backup folders?** Count files by date range (`count_files_by_date.py`) and compare the totals.
 2. **Is everything on the card already in my Lightroom catalog?** (`check_lr_catalog.py`)
 
-A third script, `compare_files.py`, is a [legacy](#legacy-compare_filespy) folder-size comparison that is being phased out.
+A third script, `compare_files.py`, is the safest pre-format check: compare every file downloaded from the card against the backup and audit anything missing. See [`compare_files.py`](#compare_filespy-compare-the-cards-files-against-the-backup).
 
 ## Overview
 
@@ -95,15 +95,14 @@ Or open a handful by hand:
 open -a Preview "/Volumes/LEICA M/DCIM/102OLYMP/P7140110.ORF" "/Volumes/LEICA M/DCIM/102OLYMP/P7140111.ORF"
 ```
 
-### Legacy: `compare_files.py`
+### `compare_files.py`: compare the card's files against the backup
 
-> **Deprecated.** This script is a holdover from an earlier workflow and is being replaced by running `count_files_by_date.py` on the backup location. New use isn't recommended.
+The safest check before formatting an SD card, especially if you forgot to verify earlier:
 
-The earlier workflow was:
-
-1. Import the files to a local drive.
-2. Copy those files to a backup volume.
-3. Compare the two with this script.
+1. Download **all** raw files from the card.
+2. Place them in the source comparison folder.
+3. Run this script and look for mismatches or missing files.
+4. Audit anything reported missing (for example, test shots you chose not to back up) using the Preview command it prints.
 
 For each top-level folder in the source, it finds a folder with the same name anywhere under the backup root. It then compares the total size and file count of the matching files, and reports folders that differ or are missing from the backup.
 
@@ -111,9 +110,20 @@ For each top-level folder in the source, it finds a folder with the same name an
 python3 compare_files.py SOURCE_ROOT BACKUP_ROOT [--camera {default,sony,olympus}]
 ```
 
-Why it's being phased out: it only works when the source and backup have identically named folders, so it is sensitive to how each side is organized, and counting files by date range in the backup gives the same assurance without that requirement. It also exits with an error if either folder doesn't exist, which was handy when the backup drive wasn't mounted.
+If anything mismatches, the summary lists each mismatched folder, followed by a ready-to-paste command that opens every missing file in Preview. A file counts as missing if the backup has no file with the same name, or has one with a different size (which also catches partial copies). Every file in a folder that isn't in the backup at all is included.
 
-`count_files_by_date.py` still imports two helpers from this file (`get_allowed_extensions` and `check_folder_exists`), so don't delete it until those move. See the [TODO](#todo).
+```
+Summary of mismatches:
+- 10.31.2026: Source Size=5164466058 bytes (5.16 GB), Backup Size=4935356429 bytes (4.94 GB)
+- folder (11.01.2026) is not in any of the parent target directory /Volumes/Backup/Photos
+
+To review missing files in Preview:
+open -a Preview /path/to/file1.dng /path/to/file2.dng
+```
+
+It only works when the source and backup have identically named folders. It also exits with an error if either folder doesn't exist, which is handy when the backup drive isn't mounted.
+
+`count_files_by_date.py` imports two helpers from this file (`get_allowed_extensions` and `check_folder_exists`). See the [TODO](#todo).
 
 ## Bash profile installation
 
@@ -190,9 +200,9 @@ sdrecent_backup() {
 
 For another camera, point the function at the matching import folder and pass `--camera`, e.g. `~/Pictures/imports-olympus --camera olympus`.
 
-### Legacy alias
+### Compare alias
 
-If you still use the old folder comparison:
+For the folder comparison:
 
 ```bash
 alias sdcompare='python3 "$SD_CARD_CHECK/compare_files.py"'   # sdcompare SOURCE BACKUP [--camera ...]
@@ -200,14 +210,14 @@ alias sdcompare='python3 "$SD_CARD_CHECK/compare_files.py"'   # sdcompare SOURCE
 
 ## Notes
 
-- `count_files_by_date.py` imports helpers from `compare_files.py`, so keep them in the same directory for now.
+- `count_files_by_date.py` imports helpers from `compare_files.py`, so keep them in the same directory.
 - Extension matching is case-insensitive.
 
 ## TODO
 
 Future enhancements. The scripts currently assume a specific naming convention and folder layout.
 
-- [ ] **Remove `compare_files.py`.** First move `get_allowed_extensions` and `check_folder_exists` into a shared module (e.g. `common.py`) that `count_files_by_date.py` imports, then delete the legacy script and its alias.
+- [ ] **Move shared helpers.** Move `get_allowed_extensions` and `check_folder_exists` into a shared module (e.g. `common.py`) that both `count_files_by_date.py` and `compare_files.py` import.
 - [ ] **Compare two folders in one run.** Let `count_files_by_date.py` take multiple folders (import and backup) and report the totals side by side, flagging any difference, so the two-command check becomes one.
 - [ ] **Configurable filename date prefix** in `count_files_by_date.py`. The `MM.DD.YYYY_` format is hardcoded in the `FILENAME_DATE` regex. Add an option (e.g. `--date-format "%Y-%m-%d"` or `--prefix-regex`) so other renaming schemes work.
 - [ ] **Configurable file extensions.** The per-camera lists in `get_allowed_extensions()` and `SUPPORTED_EXTENSIONS` in `check_lr_catalog.py` are hardcoded. Add an `--extensions` flag or a config file, and add more camera presets.

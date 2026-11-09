@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import shlex
 
 def check_folder_exists(folder_path):
     """
@@ -51,6 +52,33 @@ def count_files(path, allowed_extensions):
             if file.lower().endswith(allowed_extensions):
                 file_count += 1
     return file_count
+
+def list_files(path, allowed_extensions):
+    """
+    Returns a list of (filename, full_path, size) for allowed files under path.
+    """
+    results = []
+    for root, _, files in os.walk(path):
+        for file in files:
+            if file.lower().endswith(allowed_extensions):
+                full = os.path.join(root, file)
+                results.append((file, full, os.path.getsize(full)))
+    return results
+
+def find_missing_files(source_path, backup_path, allowed_extensions):
+    """
+    Returns full source paths of files that are absent from the backup (by name)
+    or present with a different size. If backup_path is None, all source files.
+    """
+    backup_sizes = {}
+    if backup_path:
+        for name, _, size in list_files(backup_path, allowed_extensions):
+            backup_sizes.setdefault(name, set()).add(size)
+    return sorted(
+        full
+        for name, full, size in list_files(source_path, allowed_extensions)
+        if size not in backup_sizes.get(name, set())
+    )
 
 def find_matching_backup_folder(source_folder_name, backup_root):
     """
@@ -104,7 +132,8 @@ def compare_folder_sizes_with_filter(source_root, backup_root, allowed_extension
             backup_total_files += backup_file_count
 
             if source_size != backup_size:
-                mismatches.append((folder, source_size, backup_size))
+                missing = find_missing_files(source_path, backup_path, allowed_extensions)
+                mismatches.append((folder, source_size, backup_size, missing))
                 print(
                     f"Mismatch in '{folder}': "
                     f"Source={source_size} bytes ({human_readable_size(source_size)}), "
@@ -117,7 +146,8 @@ def compare_folder_sizes_with_filter(source_root, backup_root, allowed_extension
                     f" | File Count={backup_file_count}"
                 )
         else:
-            mismatches.append((folder, None, None))
+            missing = find_missing_files(source_path, None, allowed_extensions)
+            mismatches.append((folder, None, None, missing))
             print(f"folder ({folder}) is not in any of the parent target directory {backup_root}")
 
     print("\nGrand Total:")
@@ -172,7 +202,9 @@ if __name__ == "__main__":
 
     if mismatches:
         print("\nSummary of mismatches:")
-        for folder, source_size, backup_size in mismatches:
+        all_missing = []
+        for folder, source_size, backup_size, missing in mismatches:
+            all_missing.extend(missing)
             if backup_size is None:
                 print(f"- folder ({folder}) is not in any of the parent target directory {args.backup_root}")
             else:
@@ -180,5 +212,8 @@ if __name__ == "__main__":
                     f"- {folder}: Source Size={source_size} bytes ({human_readable_size(source_size)}), "
                     f"Backup Size={backup_size} bytes ({human_readable_size(backup_size)})"
                 )
+        if all_missing:
+            quoted = " ".join(shlex.quote(f) for f in all_missing)
+            print(f"\nTo review missing files in Preview:\nopen -a Preview {quoted}")
     else:
         print("\nAll folders match!")
